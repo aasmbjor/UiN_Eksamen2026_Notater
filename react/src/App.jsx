@@ -1,6 +1,6 @@
 
-import { useState, useEffect } from 'react'
 import './App.css'
+import { useState, useEffect } from 'react'
 import { Route, Routes } from 'react-router-dom'
 import client from '../helpers/sanityClient'
 import Frontpage from './components/Frontpage'
@@ -21,7 +21,9 @@ function App() {
     const fetchUser = async () => {
       try {
         const query = `*[_type == "borrower"][0]{ _id, name, email }`
+        // Her hentes brukeren som logges inn på systemet, her er det statisk, dersom man vil ha det dynamisk, kan man bruke f.eks cookies
         const user = await client.fetch(query)
+        // Venter på Sanity-spørringen, når den er hentet, logges brukeren inn
         setLoggedInUser(user)
       } catch (error) {
         console.error('Error fetching logged in user:', error)

@@ -1,23 +1,34 @@
 import client from "./sanityClient.js";
 import { v4 as uuid } from "uuid";
 
-// Helper to create a plain reference (for single-reference fields)
+// Hjelpefunksjon for å opprette en standard Sanity-referanse.
+// Brukes for enkeltstående referansefelt (for eksempel én forfatter på én bok).
 const ref = (id) => ({
   _type: "reference",
   _ref: id
 });
 
-// Helper to create a keyed reference (for items inside an array of references)
+// Hjelpefunksjon for å opprette en Sanity-referanse som skal ligge i en array.
+// Sanity krever at alle elementer i en array (som en liste med sjangere eller bøker)
+// har en unik '_key'-egenskap. Her bruker vi uuid() for å generere den automatisk.
 const keyedRef = (id) => ({
   _type: "reference",
   _ref: id,
   _key: uuid()
 });
 
+/**
+ * Hovedfunksjon for å "seede" (fylle) databasen med initial testdata.
+ * Den sletter først alt gammelt innhold av bestemte typer, og oppretter 
+ * deretter et komplett, ferdig koblet nettverk av forfattere, bøker, sjangere og ordrer.
+ */
 async function seed() {
   console.log("🧹 Tømmer databasen...");
 
-  // --- DELETE EXISTING DATA (kun disse typene) ---
+  // --- SLETTING AV EKSISTERENDE DATA ---
+  // Bruker en direkte slette-spørring mot Sanity. Dette sletter KUN de spesifiserte 
+  // dokumenttypene, slik at vi ikke ved et uhell sletter andre viktige ting i Sanity 
+  // (som f.eks. "system"-dokumenter eller bilde-assets).
   await client.delete({
     query: '*[_type in ["author", "book", "borrower", "order", "genre"]]'
   });
@@ -25,7 +36,13 @@ async function seed() {
   console.log("✅ Databasen er tømt");
   console.log("🌱 Seeder testdata...");
 
-  // --- GENRES ---
+  // --- OPPRETTELSE AV TESTDATA ---
+  // Vi genererer UUID-er for alle dokumenter allerede her i koden.
+  // Grunnen til det er at vi trenger å vite ID-en til for eksempel en "genre" 
+  // slik at vi kan peke på den (referere til den) når vi oppretter en "book" litt lenger nede, 
+  // FØR noen av dem faktisk er lagret i Sanity.
+
+  // --- GENRES (Sjangere) ---
   const genres = [
     { _id: `genre-${uuid()}`, _type: "genre", title: "Fantasy" },
     { _id: `genre-${uuid()}`, _type: "genre", title: "Mystery" },
@@ -33,9 +50,10 @@ async function seed() {
     { _id: `genre-${uuid()}`, _type: "genre", title: "Literary Fiction" },
     { _id: `genre-${uuid()}`, _type: "genre", title: "Young Adult" }
   ];
+  // Dekonstruerer (destructuring) arrayen for å enkelt kunne henvise til spesifikke sjangere senere
   const [fantasy, mystery, horror, literary, ya] = genres;
 
-  // --- AUTHORS ---
+  // --- AUTHORS (Forfattere) ---
   const authors = [
     { _id: `author-${uuid()}`, _type: "author", name: "J.K. Rowling" },
     { _id: `author-${uuid()}`, _type: "author", name: "George R.R. Martin" },
@@ -46,7 +64,7 @@ async function seed() {
     { _id: `author-${uuid()}`, _type: "author", name: "Brandon Sanderson" }
   ];
 
-  // --- BOOKS ---
+  // --- BOOKS (Bøker) ---
   const books = [
     {
       _id: `book-${uuid()}`,
@@ -54,7 +72,9 @@ async function seed() {
       title: "Harry Potter and the Philosopher's Stone",
       isbn: "9780747532699",
       publishedYear: 1997,
+      // Bruker hjelpefunksjonen 'ref' for å koble boken til forfatterens ID (J.K. Rowling)
       author: ref(authors[0]._id),
+      // Bruker 'keyedRef' siden genres er en array
       genres: [keyedRef(fantasy._id), keyedRef(ya._id)]
     },
     {
@@ -149,7 +169,7 @@ async function seed() {
     }
   ];
 
-  // --- BORROWERS ---
+  // --- BORROWERS (Låntakere) ---
   const borrowers = [
     {
       _id: `borrower-${uuid()}`,
@@ -177,11 +197,12 @@ async function seed() {
     }
   ];
 
-  // --- ORDERS ---
+  // --- ORDERS (Utlån/Ordrer) ---
   const orders = [
     {
       _id: `order-${uuid()}`,
       _type: "order",
+      // Kobler ordren til spesifikke låntakere og bøker
       borrower: ref(borrowers[0]._id),
       books: [keyedRef(books[0]._id), keyedRef(books[2]._id)],
       orderDate: new Date("2024-01-10").toISOString()
@@ -220,20 +241,25 @@ async function seed() {
     }
   ];
 
+  // Slår sammen alle arrayene til én stor felles array ved hjelp av "spread"-operatoren (...)
   const allDocs = [...genres, ...authors, ...books, ...borrowers, ...orders];
 
-  // --- COMMIT ---
+  // --- COMMIT TIL DATABASEN ---
+  // Starter en transaksjon slik at alle dokumentene opprettes i Sanity samtidig.
+  // Dette er raskere og sikrere: Hvis ett dokument feiler, blir ingenting lagret.
   const tx = client.transaction();
 
   allDocs.forEach((doc) => {
     tx.create(doc);
   });
 
+  // Sender transaksjonen til Sanity
   await tx.commit();
 
   console.log("🎉 Seeding fullført!");
 }
 
+// Kjører funksjonen, med feilhåndtering i tilfelle Sanity-kallet krasjer (f.eks. manglende API-nøkkel)
 seed().catch((err) => {
   console.error("❌ Seeding feilet:", err);
   process.exit(1);
